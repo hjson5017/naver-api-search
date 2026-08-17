@@ -423,26 +423,26 @@ if fetch_btn or "last_search_key" not in st.session_state or st.session_state["l
                     gender=gender_val
                 )
                 try:
-    df_shop_gender = fetcher.fetch_shopping_gender_insight(
-        category_code=target_category_code,
-        start_date=start_str,
-        end_date=end_str,
-        time_unit=time_unit
-    )
-except Exception as e:
-    st.warning(f"⚠️ 쇼핑인사이트(성별): {e}")
-    df_shop_gender = pd.DataFrame()
+                    df_shop_gender = fetcher.fetch_shopping_gender_insight(
+                        category_code=target_category_code,
+                        start_date=start_str,
+                        end_date=end_str,
+                        time_unit=time_unit
+                    )
+                except Exception as e:
+                    st.warning(f"⚠️ 쇼핑인사이트(성별): {e}")
+                    df_shop_gender = pd.DataFrame()
 
-try:
-    df_shop_age = fetcher.fetch_shopping_age_insight(
-        category_code=target_category_code,
-        start_date=start_str,
-        end_date=end_str,
-        time_unit=time_unit
-    )
-except Exception as e:
-    st.warning(f"⚠️ 쇼핑인사이트(연령): {e}")
-    df_shop_age = pd.DataFrame()
+                try:
+                    df_shop_age = fetcher.fetch_shopping_age_insight(
+                        category_code=target_category_code,
+                        start_date=start_str,
+                        end_date=end_str,
+                        time_unit=time_unit
+                    )
+                except Exception as e:
+                    st.warning(f"⚠️ 쇼핑인사이트(연령): {e}")
+                    df_shop_age = pd.DataFrame()
 
                 # 4. 실시간 멀티 채널 수집 (뉴스, 블로그, 카페, 장소)
                 df_news_items = fetcher.fetch_news_items(target_query, display=30)
