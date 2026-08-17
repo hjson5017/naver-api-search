@@ -213,33 +213,37 @@ class NaverDataFetcher:
         }
         res = self._post("/shopping/v1/category/gender", body)
 
+        # 실제 응답 구조 (2026-08 확인): results[].title은 카테고리 코드이고,
+        # 성별 구분은 각 data 항목의 "group" 필드("m"/"f")에 들어있습니다.
+        # 예: {"results":[{"title":"50000007","data":[{"period":...,"ratio":...,"group":"f"}, ...]}]}
         res_data = res.json()
         results = res_data.get("results", [])
         records = []
         unrecognized = False
         for grp in results:
-            raw_title = grp.get("title")
-            if raw_title == "m":
-                gender_name = "남성"
-            elif raw_title == "f":
-                gender_name = "여성"
-            else:
-                # API가 성별 코드가 아닌 다른 값(예: 카테고리 코드)을 돌려주면
-                # 잘못된 차트를 만드는 대신 원인을 그대로 노출합니다.
-                unrecognized = True
-                gender_name = raw_title
             for data_item in grp.get("data", []):
+                raw_group = data_item.get("group")
+                if raw_group == "m":
+                    gender_name = "남성"
+                elif raw_group == "f":
+                    gender_name = "여성"
+                else:
+                    unrecognized = True
+                    gender_name = raw_group
                 records.append({
                     "period": data_item.get("period"),
                     "gender": gender_name,
                     "ratio": float(data_item.get("ratio", 0.0))
                 })
-        if unrecognized or not results:
+        if unrecognized or not records:
             raise NaverApiError(
-                "쇼핑인사이트(성별) 응답이 예상 형식(m/f)이 아닙니다. "
+                "쇼핑인사이트(성별) 응답이 예상 형식(group=m/f)이 아닙니다. "
                 f"원본 응답: {json.dumps(res_data, ensure_ascii=False)[:600]}"
             )
-        return pd.DataFrame(records)
+        # 화면(파이차트)은 성별당 값 1개를 기대하므로, 조회 기간 내 기간별 값을 평균내서
+        # 성별당 한 줄로 합칩니다. (합치지 않으면 기간 수만큼 중복 누적되어 왜곡됩니다.)
+        df_raw = pd.DataFrame(records)
+        return df_raw.groupby("gender", as_index=False)["ratio"].mean()
 
     def fetch_shopping_age_insight(
         self,
@@ -260,27 +264,32 @@ class NaverDataFetcher:
         }
         res = self._post("/shopping/v1/category/age", body)
 
+        # 성별 인사이트와 동일하게, 연령대 구분도 각 data 항목의 "group" 필드
+        # ("10"/"20"/"30"/"40"/"50"/"60")에 들어있습니다.
         res_data = res.json()
         results = res_data.get("results", [])
         records = []
         unrecognized = False
         for grp in results:
-            raw_age = grp.get("title", "")
-            if raw_age not in AGE_MAP:
-                unrecognized = True
-            age_label = AGE_MAP.get(raw_age, f"{raw_age}대")
             for data_item in grp.get("data", []):
+                raw_group = data_item.get("group", "")
+                if raw_group not in AGE_MAP:
+                    unrecognized = True
+                age_label = AGE_MAP.get(raw_group, f"{raw_group}대")
                 records.append({
                     "period": data_item.get("period"),
                     "age_group": age_label,
                     "ratio": float(data_item.get("ratio", 0.0))
                 })
-        if unrecognized or not results:
+        if unrecognized or not records:
             raise NaverApiError(
-                "쇼핑인사이트(연령) 응답이 예상 형식(연령대 코드)이 아닙니다. "
+                "쇼핑인사이트(연령) 응답이 예상 형식(group=연령대 코드)이 아닙니다. "
                 f"원본 응답: {json.dumps(res_data, ensure_ascii=False)[:600]}"
             )
-        return pd.DataFrame(records)
+        # 화면(막대차트)은 연령대당 값 1개를 기대하므로, 기간별 값을 평균내서
+        # 연령대당 한 줄로 합칩니다.
+        df_raw = pd.DataFrame(records)
+        return df_raw.groupby("age_group", as_index=False)["ratio"].mean()
 
     # ------------------------------------------------------------------
     # 검색 API (뉴스/블로그/카페/장소) — HUB로 이관된 것들
