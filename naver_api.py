@@ -204,11 +204,12 @@ class NaverDataFetcher:
         if not self.is_valid_credentials() or not category_code:
             return pd.DataFrame()
 
+        # 이 엔드포인트는 category를 문자열로 받습니다 (categories 엔드포인트와 다름 — 400 TypeError로 확인됨)
         body = {
             "startDate": start_date,
             "endDate": end_date,
             "timeUnit": time_unit,
-            "category": [{"name": "선택 카테고리", "param": [category_code]}]
+            "category": category_code
         }
         res = self._post("/shopping/v1/category/gender", body)
 
@@ -250,11 +251,12 @@ class NaverDataFetcher:
         if not self.is_valid_credentials() or not category_code:
             return pd.DataFrame()
 
+        # 이 엔드포인트는 category를 문자열로 받습니다 (categories 엔드포인트와 다름 — 400 TypeError로 확인됨)
         body = {
             "startDate": start_date,
             "endDate": end_date,
             "timeUnit": time_unit,
-            "category": [{"name": "선택 카테고리", "param": [category_code]}]
+            "category": category_code
         }
         res = self._post("/shopping/v1/category/age", body)
 
