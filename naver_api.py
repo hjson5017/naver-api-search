@@ -204,20 +204,40 @@ class NaverDataFetcher:
         if not self.is_valid_credentials() or not category_code:
             return pd.DataFrame()
 
-        body = {"startDate": start_date, "endDate": end_date, "timeUnit": time_unit, "category": category_code}
+        body = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "timeUnit": time_unit,
+            "category": [{"name": "선택 카테고리", "param": [category_code]}]
+        }
         res = self._post("/shopping/v1/category/gender", body)
 
         res_data = res.json()
         results = res_data.get("results", [])
         records = []
+        unrecognized = False
         for grp in results:
-            gender_name = "남성" if grp.get("title") == "m" else ("여성" if grp.get("title") == "f" else grp.get("title"))
+            raw_title = grp.get("title")
+            if raw_title == "m":
+                gender_name = "남성"
+            elif raw_title == "f":
+                gender_name = "여성"
+            else:
+                # API가 성별 코드가 아닌 다른 값(예: 카테고리 코드)을 돌려주면
+                # 잘못된 차트를 만드는 대신 원인을 그대로 노출합니다.
+                unrecognized = True
+                gender_name = raw_title
             for data_item in grp.get("data", []):
                 records.append({
                     "period": data_item.get("period"),
                     "gender": gender_name,
                     "ratio": float(data_item.get("ratio", 0.0))
                 })
+        if unrecognized or not results:
+            raise NaverApiError(
+                "쇼핑인사이트(성별) 응답이 예상 형식(m/f)이 아닙니다. "
+                f"원본 응답: {json.dumps(res_data, ensure_ascii=False)[:600]}"
+            )
         return pd.DataFrame(records)
 
     def fetch_shopping_age_insight(
@@ -230,14 +250,22 @@ class NaverDataFetcher:
         if not self.is_valid_credentials() or not category_code:
             return pd.DataFrame()
 
-        body = {"startDate": start_date, "endDate": end_date, "timeUnit": time_unit, "category": category_code}
+        body = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "timeUnit": time_unit,
+            "category": [{"name": "선택 카테고리", "param": [category_code]}]
+        }
         res = self._post("/shopping/v1/category/age", body)
 
         res_data = res.json()
         results = res_data.get("results", [])
         records = []
+        unrecognized = False
         for grp in results:
             raw_age = grp.get("title", "")
+            if raw_age not in AGE_MAP:
+                unrecognized = True
             age_label = AGE_MAP.get(raw_age, f"{raw_age}대")
             for data_item in grp.get("data", []):
                 records.append({
@@ -245,6 +273,11 @@ class NaverDataFetcher:
                     "age_group": age_label,
                     "ratio": float(data_item.get("ratio", 0.0))
                 })
+        if unrecognized or not results:
+            raise NaverApiError(
+                "쇼핑인사이트(연령) 응답이 예상 형식(연령대 코드)이 아닙니다. "
+                f"원본 응답: {json.dumps(res_data, ensure_ascii=False)[:600]}"
+            )
         return pd.DataFrame(records)
 
     # ------------------------------------------------------------------
