@@ -382,7 +382,11 @@ if fetch_btn or "last_search_key" not in st.session_state or st.session_state["l
                 auto_category_name = category_name
                 
                 target_query = keywords[0]
-                df_shop_items = fetcher.fetch_shop_items(target_query, display=50)
+                try:
+                    df_shop_items = fetcher.fetch_shop_items(target_query, display=50)
+                except Exception as e:
+                    st.warning(f"⚠️ 상품(쇼핑) 검색: {e}")
+                    df_shop_items = pd.DataFrame()
                 
                 if not target_category_code:
                     for kw_key, (c_code, c_name) in KEYWORD_CATEGORY_MAP.items():
