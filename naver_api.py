@@ -32,6 +32,11 @@ AGE_MAP = {
     "60": "50대 후반~60대 이상"
 }
 
+# NAVER API HUB 공식 베이스 도메인.
+# 예전 코드에 있던 "naveropenapi.apigw.ntruss.com"은 오타 수준으로 다른(존재하지 않거나
+# 구버전) 도메인입니다. 반드시 "naverapihub"인지 확인하세요.
+API_HUB_BASE = "https://naverapihub.apigw.ntruss.com"
+
 
 class NaverApiError(Exception):
     """네이버 API 호출이 실패했을 때 실제 원인을 그대로 담아 올리는 예외.
@@ -57,23 +62,24 @@ def clean_key_str(val: str) -> str:
 
 
 class NaverDataFetcher:
-    """NAVER 실시간 다중 채널(검색어 트렌드, 쇼핑, 뉴스, 블로그, 카페, 장소) 데이터 수집 클래스.
+    """NAVER API HUB(naverapihub.apigw.ntruss.com) 기반 데이터 수집 클래스.
 
-    주의: 이 버전은 API 호출이 실패하면 가짜 데이터로 조용히 대체하지 않고
-    NaverApiError를 발생시킵니다. 원인(상태코드/응답 본문)을 그대로 확인할 수 있습니다.
+    NOTE: 2026년 네이버 검색/데이터랩 API가 NAVER API HUB로 이관되면서
+    - 인증 헤더: X-NCP-APIGW-API-KEY-ID / X-NCP-APIGW-API-KEY (기존 X-Naver-Client-Id 계열 아님)
+    - 베이스 도메인: naverapihub.apigw.ntruss.com (기존 openapi.naver.com / naveropenapi.apigw.ntruss.com 아님)
+    - 경로: .json 확장자 제거, 대신 format=json 쿼리 파라미터 사용
+    로 바뀌었습니다. 상품(쇼핑) 검색 API는 HUB로 이관되지 않고 완전히 종료되었으므로
+    fetch_shop_items는 실패 시 명확한 안내와 함께 빈 결과를 돌려줍니다.
+
+    실패 시 가짜 데이터로 조용히 대체하지 않고 NaverApiError를 던집니다 — 원인(상태코드/응답
+    본문)을 그대로 화면에서 확인할 수 있어야 디버깅이 가능하기 때문입니다.
     """
 
     def __init__(self, client_id: str, client_secret: str):
         self.client_id = clean_key_str(client_id)
         self.client_secret = clean_key_str(client_secret)
 
-        # 일반 개발자센터(openapi.naver.com) 키 — 검색 API, 데이터랩 API 모두 이 헤더를 씁니다.
-        self.naver_headers = {
-            "X-Naver-Client-Id": self.client_id,
-            "X-Naver-Client-Secret": self.client_secret,
-        }
-        # NCP API Gateway 키(다른 발급 체계). 발급받은 적이 없다면 계속 실패하는 게 정상입니다.
-        self.ncp_headers = {
+        self.hub_headers = {
             "X-NCP-APIGW-API-KEY-ID": self.client_id,
             "X-NCP-APIGW-API-KEY": self.client_secret,
         }
@@ -81,43 +87,30 @@ class NaverDataFetcher:
     def is_valid_credentials(self) -> bool:
         return bool(self.client_id and self.client_secret)
 
-    def _post_with_fallback(self, ncp_url: str, naver_url: str, body: dict) -> requests.Response:
-        """NCP 엔드포인트를 먼저 시도하고, 실패하면 openapi.naver.com으로 재시도합니다.
-        둘 다 실패하면 마지막 응답 정보를 담아 NaverApiError를 던집니다.
-        """
-        json_data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-
-        res = requests.post(
-            ncp_url,
-            headers={**self.ncp_headers, "Content-Type": "application/json"},
-            data=json_data,
-            timeout=10,
-        )
-        if res.status_code == 200:
-            return res
-
-        res_naver = requests.post(
-            naver_url,
-            headers={**self.naver_headers, "Content-Type": "application/json"},
-            data=json_data,
-            timeout=10,
-        )
-        if res_naver.status_code == 200:
-            return res_naver
-
-        raise NaverApiError(
-            f"네이버 API 호출 실패. NCP({res.status_code}): {res.text[:300]} "
-            f"/ openapi.naver.com({res_naver.status_code}): {res_naver.text[:300]}"
-        )
-
-    def _get_with_check(self, url: str, params: dict) -> requests.Response:
-        res = requests.get(url, headers=self.naver_headers, params=params, timeout=10)
+    def _get(self, path: str, params: dict) -> requests.Response:
+        params = {**params, "format": "json"}
+        url = f"{API_HUB_BASE}{path}"
+        res = requests.get(url, headers=self.hub_headers, params=params, timeout=10)
         if res.status_code != 200:
-            raise NaverApiError(f"{url} 호출 실패 ({res.status_code}): {res.text[:300]}")
+            raise NaverApiError(f"{url} 호출 실패 ({res.status_code}): {res.text[:400]}")
+        return res
+
+    def _post(self, path: str, body: dict) -> requests.Response:
+        url = f"{API_HUB_BASE}{path}"
+        json_data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        res = requests.post(
+            url,
+            headers={**self.hub_headers, "Content-Type": "application/json"},
+            params={"format": "json"},
+            data=json_data,
+            timeout=10,
+        )
+        if res.status_code != 200:
+            raise NaverApiError(f"{url} 호출 실패 ({res.status_code}): {res.text[:400]}")
         return res
 
     # ------------------------------------------------------------------
-    # 검색어 트렌드 (Datalab Search)
+    # 검색어 트렌드 (구 /datalab/v1/search -> HUB /search-trend/v1/search)
     # ------------------------------------------------------------------
     def fetch_search_trend(
         self,
@@ -146,11 +139,7 @@ class NaverDataFetcher:
         if gender:
             body["gender"] = gender
 
-        res = self._post_with_fallback(
-            "https://naveropenapi.apigw.ntruss.com/datalab/v1/search",
-            "https://openapi.naver.com/v1/datalab/search",
-            body,
-        )
+        res = self._post("/search-trend/v1/search", body)
 
         res_data = res.json()
         results = res_data.get("results", [])
@@ -169,7 +158,7 @@ class NaverDataFetcher:
         return df
 
     # ------------------------------------------------------------------
-    # 쇼핑인사이트 (Datalab Shopping) — 개발자센터에서 별도 API 사용 승인 필요
+    # 쇼핑인사이트 (구 /datalab/v1/shopping/* -> HUB /shopping/v1/*)
     # ------------------------------------------------------------------
     def fetch_shopping_insight(
         self,
@@ -189,11 +178,7 @@ class NaverDataFetcher:
             "timeUnit": time_unit,
             "category": [{"name": "선택 카테고리", "param": [category_code]}]
         }
-        res = self._post_with_fallback(
-            "https://naveropenapi.apigw.ntruss.com/datalab/v1/shopping/categories",
-            "https://openapi.naver.com/v1/datalab/shopping/categories",
-            body,
-        )
+        res = self._post("/shopping/v1/categories", body)
 
         res_data = res.json()
         results = res_data.get("results", [])
@@ -220,13 +205,7 @@ class NaverDataFetcher:
             return pd.DataFrame()
 
         body = {"startDate": start_date, "endDate": end_date, "timeUnit": time_unit, "category": category_code}
-        # 기존 코드는 여기서 NCP 엔드포인트만 호출하고 openapi.naver.com 폴백이 없었습니다.
-        # 그래서 일반 Client ID/Secret 사용 시 항상 실패 -> 항상 가짜 데이터였습니다.
-        res = self._post_with_fallback(
-            "https://naveropenapi.apigw.ntruss.com/datalab/v1/shopping/category/gender",
-            "https://openapi.naver.com/v1/datalab/shopping/category/gender",
-            body,
-        )
+        res = self._post("/shopping/v1/category/gender", body)
 
         res_data = res.json()
         results = res_data.get("results", [])
@@ -252,12 +231,7 @@ class NaverDataFetcher:
             return pd.DataFrame()
 
         body = {"startDate": start_date, "endDate": end_date, "timeUnit": time_unit, "category": category_code}
-        # 마찬가지로 openapi.naver.com 폴백 추가
-        res = self._post_with_fallback(
-            "https://naveropenapi.apigw.ntruss.com/datalab/v1/shopping/category/age",
-            "https://openapi.naver.com/v1/datalab/shopping/category/age",
-            body,
-        )
+        res = self._post("/shopping/v1/category/age", body)
 
         res_data = res.json()
         results = res_data.get("results", [])
@@ -274,33 +248,25 @@ class NaverDataFetcher:
         return pd.DataFrame(records)
 
     # ------------------------------------------------------------------
-    # 검색 API (뉴스/블로그/카페/장소/쇼핑) — openapi.naver.com, 일반 Client ID/Secret으로 동작
+    # 검색 API (뉴스/블로그/카페/장소) — HUB로 이관된 것들
     # ------------------------------------------------------------------
     def fetch_shop_items(self, query: str, display: int = 50, sort: str = "sim") -> pd.DataFrame:
-        if not query.strip():
-            return pd.DataFrame()
-        params = {"query": query.strip(), "display": min(display, 100), "start": 1, "sort": sort}
-        res = self._get_with_check("https://openapi.naver.com/v1/search/shop.json", params)
-
-        items = res.json().get("items", [])
-        df = pd.DataFrame(items)
-        if df.empty:
-            return df
-        df["clean_title"] = df["title"].apply(clean_html_tags)
-        df["lprice"] = pd.to_numeric(df["lprice"], errors="coerce").fillna(0).astype(int)
-        df["hprice"] = pd.to_numeric(df["hprice"], errors="coerce").fillna(0).astype(int)
-        df["brand"] = df["brand"].replace("", "기타/자체제작")
-        df["maker"] = df["maker"].replace("", "기타")
-        df["category1"] = df["category1"].apply(clean_html_tags)
-        if "mallName" not in df.columns or df["mallName"].isnull().all():
-            df["mallName"] = "네이버 스마트스토어"
-        return df
+        """상품(쇼핑) 검색 API는 2026-07-31부로 NAVER API HUB에 이관되지 않고 완전히
+        종료되었습니다. 이 함수는 더 이상 실시간 데이터를 가져올 수 없으며, 호출 시
+        NaverApiError를 던집니다. app.py에서는 이 실패를 잡아 '종료된 API'임을 안내하고
+        네이버쇼핑 검색 링크로 대체하는 것을 권장합니다.
+        """
+        raise NaverApiError(
+            "네이버 상품(쇼핑) 검색 API는 2026-07-31부로 서비스가 완전히 종료되어 "
+            "NAVER API HUB에서도 제공되지 않습니다. 이 기능은 더 이상 실시간 데이터를 "
+            "가져올 수 없습니다. (네이버쇼핑 통합검색 페이지 링크로 대체하는 것을 권장합니다.)"
+        )
 
     def fetch_news_items(self, query: str, display: int = 30) -> pd.DataFrame:
         if not query.strip():
             return pd.DataFrame()
         params = {"query": query.strip(), "display": min(display, 100), "start": 1, "sort": "date"}
-        res = self._get_with_check("https://openapi.naver.com/v1/search/news.json", params)
+        res = self._get("/search/v1/news", params)
 
         items = res.json().get("items", [])
         df = pd.DataFrame(items)
@@ -315,7 +281,7 @@ class NaverDataFetcher:
         if not query.strip():
             return pd.DataFrame()
         params = {"query": query.strip(), "display": min(display, 100), "start": 1, "sort": "date"}
-        res = self._get_with_check("https://openapi.naver.com/v1/search/blog.json", params)
+        res = self._get("/search/v1/blog", params)
 
         items = res.json().get("items", [])
         df = pd.DataFrame(items)
@@ -330,7 +296,7 @@ class NaverDataFetcher:
         if not query.strip():
             return pd.DataFrame()
         params = {"query": query.strip(), "display": min(display, 100), "start": 1, "sort": "date"}
-        res = self._get_with_check("https://openapi.naver.com/v1/search/cafearticle.json", params)
+        res = self._get("/search/v1/cafearticle", params)
 
         items = res.json().get("items", [])
         df = pd.DataFrame(items)
@@ -345,7 +311,7 @@ class NaverDataFetcher:
         if not query.strip():
             return pd.DataFrame()
         params = {"query": query.strip(), "display": min(display, 50), "start": 1, "sort": "random"}
-        res = self._get_with_check("https://openapi.naver.com/v1/search/local.json", params)
+        res = self._get("/search/v1/local", params)
 
         items = res.json().get("items", [])
         df = pd.DataFrame(items)
