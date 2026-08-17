@@ -20,6 +20,18 @@ def sanitize_str(val):
         return ""
     return str(val).strip().strip("'").strip('"').strip()
 
+def get_secret_val(key: str, default: str = "") -> str:
+    """.env 환경 변수 또는 Streamlit Cloud의 st.secrets에서 안전하게 시크릿 값을 불러옵니다."""
+    val = os.getenv(key)
+    if val:
+        return val
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+    return default
+
 KEYWORD_CATEGORY_MAP = {
     "캠핑": ("50000007", "스포츠/레저"),
     "텐트": ("50000007", "스포츠/레저"),
@@ -223,8 +235,8 @@ st.sidebar.header("🔑 API 인증 및 모드 설정")
 
 use_sample_mode = st.sidebar.checkbox("🧪 샘플 데이터로 EDA 데모 보기", value=False, help="API 키 없이 대시보드 시각화 기능을 즉시 체험할 수 있습니다.")
 
-env_client_id = sanitize_str(os.getenv("NAVER_CLIENT_ID") or os.getenv("NCP_CLIENT_ID", ""))
-env_client_secret = sanitize_str(os.getenv("NAVER_CLIENT_SECRET") or os.getenv("NCP_CLIENT_SECRET", ""))
+env_client_id = sanitize_str(get_secret_val("NAVER_CLIENT_ID") or get_secret_val("NCP_CLIENT_ID", ""))
+env_client_secret = sanitize_str(get_secret_val("NAVER_CLIENT_SECRET") or get_secret_val("NCP_CLIENT_SECRET", ""))
 
 if "client_id" not in st.session_state:
     st.session_state["client_id"] = env_client_id
